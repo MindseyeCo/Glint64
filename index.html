@@ -1,0 +1,969 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Glint64 - Web Photo Editor</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        :root {
+            --bg-dark: #0B0B0D;
+            --silver-start: #BFC6CC;
+            --silver-end: #9BA0A6;
+            --silver-gradient: linear-gradient(180deg, var(--silver-start), var(--silver-end));
+            --border-color: #333;
+            --text-primary: #E5E7EB;
+            --text-secondary: #9CA3AF;
+        }
+
+        body {
+            background-color: var(--bg-dark);
+            color: var(--text-primary);
+            font-family: 'Inter', sans-serif;
+        }
+        
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+        .silver-border {
+            border: 2px solid;
+            border-image-slice: 1;
+            border-image-source: var(--silver-gradient);
+        }
+
+        .panel-transition {
+            transition: all 200ms cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #1a1a1c; }
+        ::-webkit-scrollbar-thumb { background: #4a4a52; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #5a5a62; }
+
+        /* Tooltip */
+        [data-tooltip]:hover::after {
+            content: attr(data-tooltip);
+            position: absolute;
+            left: 110%;
+            top: 50%;
+            transform: translateY(-50%);
+            background-color: #28282d;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            white-space: nowrap;
+            z-index: 100;
+        }
+        
+        .active-tool, .tool-btn:hover { background: rgba(255, 255, 255, 0.1); color: white; }
+
+        .slider-thumb {
+            -webkit-appearance: none; appearance: none;
+            width: 14px; height: 14px;
+            background: var(--silver-start);
+            border: 2px solid var(--bg-dark);
+            border-radius: 50%; cursor: pointer; margin-top: -5px;
+        }
+
+        .slider-track { width: 100%; height: 4px; cursor: pointer; background: #4a4a52; border-radius: 2px; }
+        input[type='range']::-webkit-slider-thumb { @apply slider-thumb; }
+        input[type='range']::-moz-range-thumb { @apply slider-thumb; }
+        input[type='range']::-webkit-slider-runnable-track { @apply slider-track; }
+        input[type='range']::-moz-range-track { @apply slider-track; }
+        
+        #canvas-container {
+            background-image: linear-gradient(45deg, #1a1a1c 25%, transparent 25%), linear-gradient(-45deg, #1a1a1c 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #1a1a1c 75%), linear-gradient(-45deg, transparent 75%, #1a1a1c 75%);
+            background-size: 20px 20px;
+            background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+        }
+
+        /* Crop Overlay */
+        #crop-overlay { position: absolute; box-shadow: 0 0 0 9999px rgba(0,0,0,0.7); border: 1px dashed white; cursor: move; }
+        .crop-handle { position: absolute; width: 10px; height: 10px; background: white; border-radius: 50%; border: 1px solid black; }
+        .crop-handle.nw { top: -5px; left: -5px; cursor: nwse-resize; }
+        .crop-handle.ne { top: -5px; right: -5px; cursor: nesw-resize; }
+        .crop-handle.sw { bottom: -5px; left: -5px; cursor: nesw-resize; }
+        .crop-handle.se { bottom: -5px; right: -5px; cursor: nwse-resize; }
+    </style>
+</head>
+<body class="overflow-hidden">
+
+    <!-- Main Application Grid -->
+    <div id="app-container" class="grid grid-rows-[auto_auto_1fr] grid-cols-[auto_1fr_auto] h-screen w-screen bg-black">
+        
+        <!-- Top Bar -->
+        <header class="col-span-3 bg-zinc-900/80 border-b border-[var(--border-color)] flex items-center justify-between px-4 py-1 z-30">
+            <div class="flex items-center gap-4">
+                <h1 class="text-xl font-bold from-slate-300 to-slate-500 bg-gradient-to-b text-transparent bg-clip-text">Glint64</h1>
+                <div class="h-6 w-px bg-zinc-700"></div>
+                <button id="open-btn" class="flex items-center gap-2 px-3 py-1.5 rounded-md hover:bg-zinc-700 transition-colors text-sm">Open</button>
+                <button id="save-btn" class="flex items-center gap-2 px-3 py-1.5 rounded-md hover:bg-zinc-700 transition-colors text-sm">Export</button>
+            </div>
+            <div class="flex items-center gap-2">
+                <button id="zoom-out-btn" class="p-2 rounded-md hover:bg-zinc-700 transition-colors"><i data-lucide="zoom-out" class="w-4 h-4"></i></button>
+                <span id="zoom-level" class="text-sm w-12 text-center">100%</span>
+                <button id="zoom-in-btn" class="p-2 rounded-md hover:bg-zinc-700 transition-colors"><i data-lucide="zoom-in" class="w-4 h-4"></i></button>
+                 <button id="fit-screen-btn" class="p-2 rounded-md hover:bg-zinc-700 transition-colors"><i data-lucide="maximize" class="w-4 h-4"></i></button>
+            </div>
+            <div class="flex items-center gap-4">
+                <button id="undo-btn" class="p-2 rounded-md hover:bg-zinc-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"><i data-lucide="undo-2" class="w-5 h-5"></i></button>
+                <button id="redo-btn" class="p-2 rounded-md hover:bg-zinc-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"><i data-lucide="redo-2" class="w-5 h-5"></i></button>
+            </div>
+        </header>
+
+        <!-- Tool Options Bar -->
+        <div id="tool-options-bar" class="col-span-3 bg-zinc-800/90 border-b border-[var(--border-color)] px-4 py-1.5 z-20 hidden items-center justify-between">
+            <!-- Content is dynamically inserted here by JS -->
+        </div>
+
+        <!-- Left Sidebar: Tools -->
+        <nav class="bg-zinc-900/80 border-r border-[var(--border-color)] p-2 flex flex-col items-center gap-2 z-20">
+            <div class="flex flex-col gap-2" id="tools-container">
+                 <button class="tool-btn p-3 rounded-md relative active-tool" data-tool="move" data-tooltip="Move (V)"><i data-lucide="move" class="w-5 h-5 pointer-events-none"></i></button>
+                <button class="tool-btn p-3 rounded-md relative" data-tool="crop" data-tooltip="Crop (C)"><i data-lucide="crop" class="w-5 h-5 pointer-events-none"></i></button>
+                <button class="tool-btn p-3 rounded-md relative" data-tool="rotate" data-tooltip="Rotate (R)"><i data-lucide="rotate-cw" class="w-5 h-5 pointer-events-none"></i></button>
+                <div class="h-px w-full bg-zinc-700 my-2"></div>
+                <button class="tool-btn p-3 rounded-md relative" data-tool="adjust" data-tooltip="Adjust (A)"><i data-lucide="sliders-horizontal" class="w-5 h-5 pointer-events-none"></i></button>
+                <button class="tool-btn p-3 rounded-md relative" data-tool="filter" data-tooltip="Filters (F)"><i data-lucide="sparkles" class="w-5 h-5 pointer-events-none"></i></button>
+                <div class="h-px w-full bg-zinc-700 my-2"></div>
+                <button class="tool-btn p-3 rounded-md relative" data-tool="retouch" data-tooltip="Retouch (J)"><i data-lucide="wand-2" class="w-5 h-5 pointer-events-none"></i></button>
+                <button class="tool-btn p-3 rounded-md relative" data-tool="text" data-tooltip="Text (T)"><i data-lucide="type" class="w-5 h-5 pointer-events-none"></i></button>
+                <button class="tool-btn p-3 rounded-md relative" data-tool="draw" data-tooltip="Draw (B)"><i data-lucide="pencil" class="w-5 h-5 pointer-events-none"></i></button>
+            </div>
+        </nav>
+
+        <!-- Main Canvas Area -->
+        <main id="canvas-container" class="bg-grid flex items-center justify-center overflow-hidden relative select-none min-w-0">
+            <div id="canvas-wrapper" class="relative shadow-2xl">
+                 <!-- Layers will be appended here as canvas elements -->
+            </div>
+            <div id="welcome-message" class="text-center text-zinc-500 absolute">
+                <i data-lucide="image" class="w-16 h-16 mx-auto mb-4"></i>
+                <h2 class="text-2xl font-semibold text-zinc-300">Welcome to Glint64</h2>
+                <p>Drag & drop an image, click 'Open', or paste from clipboard to start.</p>
+            </div>
+        </main>
+        
+        <!-- Right Panel: Properties, Layers, etc. -->
+        <aside id="right-panel" class="bg-zinc-900/80 border-l border-[var(--border-color)] w-72 p-0 flex flex-col z-20">
+            <div class="flex border-b border-[var(--border-color)]">
+                <button data-panel="layers" class="panel-tab flex-1 p-3 text-sm font-medium border-b-2 border-slate-300 text-white">Layers</button>
+                <button data-panel="adjust" class="panel-tab flex-1 p-3 text-sm font-medium border-b-2 border-transparent text-zinc-400 hover:text-white">Adjust</button>
+                <button data-panel="filter" class="panel-tab flex-1 p-3 text-sm font-medium border-b-2 border-transparent text-zinc-400 hover:text-white">Filters</button>
+                <button data-panel="history" class="panel-tab flex-1 p-3 text-sm font-medium border-b-2 border-transparent text-zinc-400 hover:text-white">History</button>
+            </div>
+            <div class="flex-1 overflow-y-auto">
+                <div id="layers-panel-content" class="panel-content p-4 space-y-2">
+                    <div class="flex justify-between items-center mb-2">
+                        <span class="text-sm font-semibold">Layers</span>
+                        <div class="flex gap-1">
+                            <button id="add-layer-btn" class="p-1.5 rounded hover:bg-zinc-700" data-tooltip="New Layer"><i data-lucide="layers" class="w-4 h-4"></i></button>
+                            <button id="delete-layer-btn" class="p-1.5 rounded hover:bg-zinc-700" data-tooltip="Delete Layer"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+                        </div>
+                    </div>
+                    <div id="layer-list" class="space-y-1"></div>
+                </div>
+                <div id="adjust-panel-content" class="panel-content p-4 space-y-4 hidden"></div>
+                <div id="filter-panel-content" class="panel-content p-4 grid grid-cols-2 gap-2 hidden"></div>
+                <div id="history-panel-content" class="panel-content p-4 space-y-2 hidden">
+                    <div id="history-list" class="flex flex-col-reverse text-sm"></div>
+                </div>
+            </div>
+        </aside>
+    </div>
+    
+    <!-- Modals -->
+    <div id="export-modal" class="fixed inset-0 bg-black/60 items-center justify-center hidden z-50">
+        <div class="bg-zinc-800 rounded-lg shadow-xl w-full max-w-sm p-6 space-y-4">
+            <h3 class="text-lg font-bold">Export Image</h3>
+            <div class="space-y-2">
+                <label for="format-select" class="text-sm font-medium">Format</label>
+                <select id="format-select" class="w-full bg-zinc-700 border border-zinc-600 rounded-md p-2">
+                    <option value="png">PNG</option><option value="jpeg">JPEG</option><option value="webp">WebP</option>
+                </select>
+            </div>
+            <div id="quality-slider-container" class="space-y-2">
+                <div class="flex justify-between">
+                    <label for="quality-slider" class="text-sm font-medium">Quality</label>
+                    <span id="quality-value">90</span>
+                </div>
+                <input id="quality-slider" type="range" min="1" max="100" value="90" class="w-full">
+            </div>
+             <div id="transparent-bg-container" class="flex items-center gap-2">
+                <input type="checkbox" id="transparent-bg" class="bg-zinc-700 rounded"><label for="transparent-bg" class="text-sm">Transparent Background</label>
+            </div>
+            <div class="flex justify-end gap-3 pt-4">
+                <button id="cancel-export-btn" class="px-4 py-2 rounded-md bg-zinc-600 hover:bg-zinc-500 transition-colors">Cancel</button>
+                <button id="confirm-export-btn" class="px-4 py-2 rounded-md bg-blue-600 hover:bg-blue-500 transition-colors">Export</button>
+            </div>
+        </div>
+    </div>
+    
+    <div id="text-modal" class="fixed inset-0 bg-black/60 items-center justify-center hidden z-50">
+        <div class="bg-zinc-800 rounded-lg shadow-xl w-full max-w-md p-6 space-y-4">
+            <h3 class="text-lg font-bold">Add Text</h3>
+            <textarea id="text-input" class="w-full bg-zinc-700 border border-zinc-600 rounded-md p-2" rows="3" placeholder="Enter text..."></textarea>
+            <div class="grid grid-cols-2 gap-4">
+                <div class="space-y-2">
+                    <label for="font-family-select" class="text-sm font-medium">Font</label>
+                    <select id="font-family-select" class="w-full bg-zinc-700 border border-zinc-600 rounded-md p-2">
+                        <option>Arial</option><option>Verdana</option><option>Georgia</option><option>Times New Roman</option><option>Courier New</option>
+                    </select>
+                </div>
+                 <div class="space-y-2">
+                    <label for="font-size-input" class="text-sm font-medium">Size</label>
+                    <input type="number" id="font-size-input" value="50" class="w-full bg-zinc-700 border border-zinc-600 rounded-md p-2">
+                </div>
+                 <div class="space-y-2">
+                    <label for="font-color-input" class="text-sm font-medium">Color</label>
+                    <input type="color" id="font-color-input" value="#ffffff" class="w-full h-10 bg-zinc-700 border border-zinc-600 rounded-md p-1">
+                </div>
+            </div>
+            <div class="flex justify-end gap-3 pt-4">
+                <button id="cancel-text-btn" class="px-4 py-2 rounded-md bg-zinc-600 hover:bg-zinc-500 transition-colors">Cancel</button>
+                <button id="confirm-text-btn" class="px-4 py-2 rounded-md bg-blue-600 hover:bg-blue-500 transition-colors">Add to Canvas</button>
+            </div>
+        </div>
+    </div>
+
+    <input type="file" id="file-input" class="hidden" accept="image/jpeg,image/png,image/webp,image/tiff,image/heic">
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            lucide.createIcons();
+
+            // --- STATE MANAGEMENT ---
+            const appState = {
+                projectName: null,
+                layers: [],
+                activeLayerId: null,
+                activeTool: 'move',
+                history: [],
+                historyIndex: -1,
+                zoom: 1,
+                pan: { x: 0, y: 0 },
+                isPanning: false,
+                isDrawing: false,
+                isMovingLayer: false,
+                isCropping: false,
+                panStart: { x: 0, y: 0 },
+                moveStart: { x: 0, y: 0 },
+                unsavedChanges: false,
+                dimensions: { width: 0, height: 0 },
+                brush: { size: 20, color: '#ffffff' },
+                cloneSource: null,
+                cropRect: null,
+                cropHandle: null,
+                lastPoint: null,
+            };
+
+            // --- DOM ELEMENTS ---
+            const getEl = (id) => document.getElementById(id);
+            const canvasContainer = getEl('canvas-container');
+            const canvasWrapper = getEl('canvas-wrapper');
+            const welcomeMessage = getEl('welcome-message');
+            const toolsContainer = getEl('tools-container');
+            const rightPanel = getEl('right-panel');
+            const layerList = getEl('layer-list');
+            const openBtn = getEl('open-btn');
+            const fileInput = getEl('file-input');
+            const saveBtn = getEl('save-btn');
+            const exportModal = getEl('export-modal');
+            const textModal = getEl('text-modal');
+            const undoBtn = getEl('undo-btn');
+            const redoBtn = getEl('redo-btn');
+            const toolOptionsBar = getEl('tool-options-bar');
+            
+            // --- ADJUSTMENT & FILTER DEFINITIONS ---
+            const adjustments = {
+                brightness: { name: 'Brightness', min: 0, max: 200, value: 100, unit: '%' },
+                contrast: { name: 'Contrast', min: 0, max: 200, value: 100, unit: '%' },
+                saturate: { name: 'Saturation', min: 0, max: 200, value: 100, unit: '%' },
+                grayscale: { name: 'Grayscale', min: 0, max: 100, value: 0, unit: '%' },
+                sepia: { name: 'Sepia', min: 0, max: 100, value: 0, unit: '%' },
+                invert: { name: 'Invert', min: 0, max: 100, value: 0, unit: '%' },
+                hueRotate: { name: 'Hue', min: 0, max: 360, value: 0, unit: 'deg', key: 'hue-rotate' },
+                blur: { name: 'Blur', min: 0, max: 20, value: 0, unit: 'px' },
+            };
+
+            const filters = {
+                'None': '', 'Vintage': 'sepia(0.5) contrast(1.2) brightness(0.9)',
+                'Mono': 'grayscale(1)', 'Lomo': 'saturate(1.5) contrast(1.1) hue-rotate(-10deg)',
+                'Clarity': 'contrast(1.4) saturate(1.1)', 'Cool': 'contrast(1.1) brightness(1.05) sepia(0.2)',
+            };
+
+            // --- INITIALIZATION ---
+            function init() {
+                setupEventListeners();
+                buildAdjustmentPanel();
+                buildFilterPanel();
+                updateUI();
+                console.log("Glint64 Photo Editor Initialized.");
+            }
+
+            // --- EVENT LISTENERS ---
+            function setupEventListeners() {
+                openBtn.addEventListener('click', () => fileInput.click());
+                fileInput.addEventListener('change', handleFileSelect);
+                document.body.addEventListener('dragover', handleDragOver);
+                document.body.addEventListener('dragleave', handleDragLeave);
+                document.body.addEventListener('drop', handleDrop);
+                document.addEventListener('paste', handlePaste);
+                toolsContainer.addEventListener('click', handleToolSelect);
+                rightPanel.addEventListener('click', handlePanelSwitch);
+                canvasContainer.addEventListener('mousedown', handleCanvasMouseDown);
+                window.addEventListener('mousemove', handleWindowMouseMove);
+                window.addEventListener('mouseup', handleWindowMouseUp);
+                canvasContainer.addEventListener('wheel', handleCanvasWheel, { passive: false });
+                saveBtn.addEventListener('click', () => { if (appState.layers.length > 0) exportModal.style.display = 'flex'; });
+                getEl('cancel-export-btn').addEventListener('click', () => exportModal.style.display = 'none');
+                getEl('confirm-export-btn').addEventListener('click', handleExport);
+                getEl('format-select').addEventListener('change', updateExportUI);
+                getEl('quality-slider').addEventListener('input', (e) => { getEl('quality-value').textContent = e.target.value; });
+                getEl('cancel-text-btn').addEventListener('click', () => textModal.style.display = 'none');
+                getEl('confirm-text-btn').addEventListener('click', addTextToCanvas);
+                undoBtn.addEventListener('click', undo);
+                redoBtn.addEventListener('click', redo);
+                getEl('zoom-in-btn').addEventListener('click', () => zoom(1.25));
+                getEl('zoom-out-btn').addEventListener('click', () => zoom(0.8));
+                getEl('fit-screen-btn').addEventListener('click', fitToScreen);
+                getEl('add-layer-btn').addEventListener('click', addNewLayer);
+                getEl('delete-layer-btn').addEventListener('click', deleteActiveLayer);
+                window.addEventListener('resize', fitToScreen);
+                window.addEventListener('beforeunload', (e) => {
+                    if (appState.unsavedChanges) { e.preventDefault(); e.returnValue = ''; }
+                });
+            }
+
+            // --- FILE HANDLING ---
+            function handleFileSelect(e) { if (e.target.files[0]) loadImageFile(e.target.files[0]); }
+            function handleDragOver(e) { e.preventDefault(); e.stopPropagation(); canvasContainer.classList.add('bg-zinc-800'); }
+            function handleDragLeave(e) { e.preventDefault(); e.stopPropagation(); canvasContainer.classList.remove('bg-zinc-800'); }
+            function handleDrop(e) {
+                e.preventDefault(); e.stopPropagation();
+                canvasContainer.classList.remove('bg-zinc-800');
+                if (e.dataTransfer.files[0] && e.dataTransfer.files[0].type.startsWith('image/')) {
+                    loadImageFile(e.dataTransfer.files[0]);
+                }
+            }
+            function handlePaste(e) {
+                for (const item of e.clipboardData.items) {
+                    if (item.type.indexOf('image') !== -1) { loadImageFile(item.getAsFile()); break; }
+                }
+            }
+            function loadImageFile(file) {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        requestAnimationFrame(() => {
+                            newProject(img.width, img.height, file.name, img);
+                        });
+                    };
+                    img.src = e.target.result;
+                };
+                reader.readAsDataURL(file);
+            }
+            function newProject(width, height, name, image = null) {
+                welcomeMessage.style.display = 'none';
+                appState.layers = [];
+                canvasWrapper.innerHTML = '';
+                appState.history = [];
+                appState.historyIndex = -1;
+                appState.projectName = name;
+                appState.dimensions = { width, height };
+                canvasWrapper.style.width = `${width}px`;
+                canvasWrapper.style.height = `${height}px`;
+                const initialLayer = createLayer(`Background`, image);
+                addLayer(initialLayer, false);
+                setActiveLayer(initialLayer.id);
+                fitToScreen();
+                updateFilterPreviews();
+                pushHistoryState('Import Image', initialLayer.id);
+            }
+
+            // --- LAYER MANAGEMENT ---
+            function createLayer(name, image = null) {
+                const canvas = document.createElement('canvas');
+                canvas.width = appState.dimensions.width;
+                canvas.height = appState.dimensions.height;
+                const ctx = canvas.getContext('2d');
+                if (image) ctx.drawImage(image, 0, 0);
+                const layer = {
+                    id: Date.now() + Math.random(), name, canvas, ctx,
+                    visible: true, opacity: 1, blendMode: 'normal',
+                    adjustments: {}, presetFilter: 'None', x: 0, y: 0,
+                };
+                Object.entries(adjustments).forEach(([key, adj]) => {
+                    layer.adjustments[adj.key || key] = adj.value;
+                });
+                return layer;
+            }
+            function addLayer(layer, recordHistory = true) {
+                appState.layers.push(layer);
+                canvasWrapper.appendChild(layer.canvas);
+                if (recordHistory) pushHistoryState(`Add Layer: ${layer.name}`);
+                updateUI();
+            }
+            function addNewLayer() {
+                if (!appState.projectName) return;
+                const newLayer = createLayer(`Layer ${appState.layers.length + 1}`);
+                addLayer(newLayer);
+                setActiveLayer(newLayer.id);
+            }
+            function deleteActiveLayer() {
+                if (appState.layers.length <= 1 || !appState.activeLayerId) return;
+                const layerIndex = appState.layers.findIndex(l => l.id === appState.activeLayerId);
+                const [deletedLayer] = appState.layers.splice(layerIndex, 1);
+                deletedLayer.canvas.remove();
+                pushHistoryState(`Delete Layer: ${deletedLayer.name}`);
+                const newActiveIndex = Math.max(0, layerIndex - 1);
+                setActiveLayer(appState.layers[newActiveIndex]?.id || null);
+                updateUI();
+            }
+            function getActiveLayer() { return appState.layers.find(l => l.id === appState.activeLayerId); }
+            function setActiveLayer(id) { appState.activeLayerId = id; updateUI(); }
+
+            // --- UI & PANEL BUILDERS ---
+            function buildAdjustmentPanel() {
+                const panel = getEl('adjust-panel-content');
+                panel.innerHTML = '';
+                for (const key in adjustments) {
+                    const adj = adjustments[key];
+                    const div = document.createElement('div');
+                    div.innerHTML = `
+                        <div class="flex justify-between text-sm"><span>${adj.name}</span><span id="${key}-value">${adj.value}</span></div>
+                        <input id="${key}-slider" type="range" min="${adj.min}" max="${adj.max}" value="${adj.value}" class="w-full">
+                    `;
+                    panel.appendChild(div);
+                    const slider = div.querySelector('input');
+                    slider.addEventListener('input', (e) => {
+                        const layer = getActiveLayer();
+                        if (!layer) return;
+                        const filterKey = adj.key || key;
+                        layer.adjustments[filterKey] = parseFloat(e.target.value);
+                        getEl(`${key}-value`).textContent = e.target.value;
+                        updateLayerStyles();
+                    });
+                     slider.addEventListener('change', () => pushHistoryState(`Adjust ${adj.name}`, getActiveLayer()?.id));
+                }
+            }
+            function buildFilterPanel() {
+                const panel = getEl('filter-panel-content');
+                panel.innerHTML = '';
+                for (const name in filters) {
+                    const btn = document.createElement('button');
+                    btn.className = "aspect-square bg-zinc-700 bg-cover bg-center rounded-md text-xs text-center content-end pb-1 text-white font-semibold [text-shadow:0_1px_2px_rgba(0,0,0,0.8)]";
+                    btn.textContent = name;
+                    btn.addEventListener('click', () => {
+                        const layer = getActiveLayer();
+                        if (!layer) return;
+                        layer.presetFilter = name;
+                        updateLayerStyles();
+                        pushHistoryState(`Apply Filter: ${name}`, layer.id);
+                    });
+                    panel.appendChild(btn);
+                }
+            }
+
+            function updateFilterPreviews() {
+                const baseLayer = appState.layers[0];
+                if (!baseLayer || baseLayer.canvas.width === 0) return;
+                const previewCanvas = document.createElement('canvas');
+                const previewSize = 100;
+                previewCanvas.width = previewSize;
+                previewCanvas.height = previewSize;
+                const previewCtx = previewCanvas.getContext('2d');
+                const source = baseLayer.canvas;
+                const sourceAspect = source.width / source.height;
+                let sWidth = source.width, sHeight = source.height, sx = 0, sy = 0;
+                if (sourceAspect > 1) { sWidth = source.height; sx = (source.width - sWidth) / 2; } 
+                else { sHeight = source.width; sy = (source.height - sHeight) / 2; }
+                const panel = getEl('filter-panel-content');
+                Object.keys(filters).forEach((name, i) => {
+                    const btn = panel.querySelector(`button:nth-child(${i + 1})`);
+                    if (!btn) return;
+                    previewCtx.clearRect(0, 0, previewSize, previewSize);
+                    previewCtx.filter = filters[name];
+                    previewCtx.drawImage(source, sx, sy, sWidth, sHeight, 0, 0, previewSize, previewSize);
+                    previewCtx.filter = 'none';
+                    btn.style.backgroundImage = `url(${previewCanvas.toDataURL()})`;
+                });
+            }
+
+            function updateToolOptionsBar() {
+                toolOptionsBar.innerHTML = '';
+                toolOptionsBar.classList.remove('hidden', 'flex');
+                if (appState.activeTool === 'draw' || appState.activeTool === 'retouch') {
+                    toolOptionsBar.classList.add('flex');
+                    const toolName = appState.activeTool === 'retouch' ? 'Clone' : 'Draw';
+                    const helpText = appState.activeTool === 'retouch' ? '<span class="text-xs text-zinc-400">Alt+Click to set source</span>' : '';
+                    toolOptionsBar.innerHTML = `
+                        <div class="flex items-center gap-4">
+                            <div class="flex items-center gap-2">
+                                <label class="text-sm">Size:</label><input type="range" id="brush-size" min="1" max="200" value="${appState.brush.size}" class="w-32">
+                            </div>
+                            ${ appState.activeTool === 'draw' ? `<div class="flex items-center gap-2"><label class="text-sm">Color:</label><input type="color" id="brush-color" value="${appState.brush.color}"></div>` : '' }
+                            ${helpText}
+                        </div>`;
+                    getEl('brush-size').addEventListener('input', (e) => appState.brush.size = e.target.value);
+                    if (appState.activeTool === 'draw') {
+                        getEl('brush-color').addEventListener('input', (e) => appState.brush.color = e.target.value);
+                    }
+                } else if (appState.activeTool === 'crop' || appState.activeTool === 'rotate') {
+                    toolOptionsBar.classList.add('flex');
+                    const actions = appState.activeTool === 'crop'
+                        ? `<button id="apply-crop-btn" class="px-3 py-1 bg-blue-600 rounded">Apply</button><button id="cancel-crop-btn" class="px-3 py-1 bg-zinc-600 rounded">Cancel</button>`
+                        : `<button id="rotate-left-btn" class="px-3 py-1 bg-zinc-600 rounded">-90°</button><button id="rotate-right-btn" class="px-3 py-1 bg-zinc-600 rounded">90°</button>`;
+                    toolOptionsBar.innerHTML = `<div class="flex items-center gap-2">${actions}</div>`;
+                    if (appState.activeTool === 'crop') {
+                        getEl('apply-crop-btn').addEventListener('click', applyCrop);
+                        getEl('cancel-crop-btn').addEventListener('click', cancelCrop);
+                    } else {
+                        getEl('rotate-left-btn').addEventListener('click', () => rotateProject(-90));
+                        getEl('rotate-right-btn').addEventListener('click', () => rotateProject(90));
+                    }
+                } else if (appState.activeTool === 'text') {
+                     toolOptionsBar.classList.add('flex');
+                     toolOptionsBar.innerHTML = `<button id="add-text-btn" class="px-3 py-1 bg-blue-600 rounded">Add Text</button>`;
+                     getEl('add-text-btn').addEventListener('click', () => textModal.style.display = 'flex');
+                }
+            }
+
+            // --- UI UPDATES ---
+            function updateUI() {
+                updateToolUI();
+                updateLayerPanel();
+                updateHistoryPanel();
+                updateUndoRedoButtons();
+                updateCanvasTransform();
+                updateLayerStyles();
+                updateToolOptionsBar();
+            }
+            function updateToolUI() {
+                document.querySelectorAll('.tool-btn').forEach(btn => {
+                    btn.classList.toggle('active-tool', btn.dataset.tool === appState.activeTool);
+                });
+            }
+            function handleToolSelect(e) {
+                const toolButton = e.target.closest('.tool-btn');
+                if (!toolButton) return;
+                const newTool = toolButton.dataset.tool;
+                if (appState.activeTool === 'crop' && newTool !== 'crop') cancelCrop();
+                appState.activeTool = newTool;
+                if(appState.activeTool === 'crop') startCrop();
+                if(['adjust', 'filter'].includes(appState.activeTool)) switchPanel(appState.activeTool);
+                updateUI();
+            }
+            function handlePanelSwitch(e) {
+                const tab = e.target.closest('.panel-tab');
+                if (tab) switchPanel(tab.dataset.panel);
+            }
+            function switchPanel(panelId) {
+                document.querySelectorAll('.panel-tab').forEach(t => {
+                    const isActive = t.dataset.panel === panelId;
+                    t.classList.toggle('border-slate-300', isActive); t.classList.toggle('text-white', isActive);
+                    t.classList.toggle('border-transparent', !isActive); t.classList.toggle('text-zinc-400', !isActive);
+                });
+                document.querySelectorAll('.panel-content').forEach(p => {
+                    p.classList.toggle('hidden', p.id !== `${panelId}-panel-content`);
+                });
+            }
+            function updateLayerPanel() {
+                layerList.innerHTML = '';
+                [...appState.layers].reverse().forEach(layer => {
+                    const item = document.createElement('div');
+                    item.className = `p-2 rounded-md flex items-center gap-2 cursor-pointer ${layer.id === appState.activeLayerId ? 'bg-blue-600/30' : 'hover:bg-zinc-700'}`;
+                    item.dataset.layerId = layer.id;
+                    item.innerHTML = `<button class="toggle-visibility p-1"><i data-lucide="${layer.visible ? 'eye' : 'eye-off'}" class="w-4 h-4"></i></button><span class="flex-1 truncate">${layer.name}</span>`;
+                    item.addEventListener('click', (e) => {
+                        if (e.target.closest('.toggle-visibility')) {
+                            layer.visible = !layer.visible;
+                            pushHistoryState(`${layer.visible ? 'Show' : 'Hide'} Layer`);
+                            updateUI();
+                        } else { setActiveLayer(layer.id); }
+                    });
+                    layerList.appendChild(item);
+                });
+                lucide.createIcons();
+            }
+            function updateLayerStyles() {
+                appState.layers.forEach((layer, index) => {
+                    layer.canvas.style.zIndex = index;
+                    layer.canvas.style.opacity = layer.opacity;
+                    layer.canvas.style.mixBlendMode = layer.blendMode;
+                    layer.canvas.style.display = layer.visible ? 'block' : 'none';
+                    layer.canvas.style.transform = `translate(${layer.x}px, ${layer.y}px)`;
+                    
+                    const adjustmentString = Object.entries(layer.adjustments)
+                        .map(([key, value]) => {
+                            const adj = Object.values(adjustments).find(a => (a.key || a.name.toLowerCase()) === key) || {};
+                            const defaultValue = adj.value;
+                            if (value === defaultValue) return '';
+                            return `${key.replace(/([A-Z])/g, "-$1").toLowerCase()}(${value}${adj?.unit || ''})`;
+                        }).filter(Boolean).join(' ');
+
+                    const presetFilterString = filters[layer.presetFilter] || '';
+                    layer.canvas.style.filter = `${presetFilterString} ${adjustmentString}`.trim();
+                });
+            }
+            function updateUndoRedoButtons() {
+                undoBtn.disabled = appState.historyIndex < 1;
+                redoBtn.disabled = appState.historyIndex >= appState.history.length - 1;
+            }
+            function updateHistoryPanel() {
+                const historyList = getEl('history-list');
+                historyList.innerHTML = '';
+                appState.history.forEach((item, index) => {
+                    const div = document.createElement('div');
+                    div.className = `p-2 rounded-md cursor-pointer ${index === appState.historyIndex ? 'bg-zinc-700' : 'hover:bg-zinc-800'}`;
+                    div.textContent = item.action;
+                    div.addEventListener('click', () => { if(index !== appState.historyIndex) restoreStateFromHistory(index); });
+                    historyList.appendChild(div);
+                });
+            }
+
+            // --- HISTORY (UNDO/REDO) ---
+            function pushHistoryState(action, layerIdToCapture = null) {
+                if (appState.historyIndex < appState.history.length - 1) {
+                    appState.history = appState.history.slice(0, appState.historyIndex + 1);
+                }
+                const captureLayer = layerIdToCapture ? appState.layers.find(l => l.id === layerIdToCapture) : null;
+                const stateSnapshot = {
+                    layers: JSON.parse(JSON.stringify(appState.layers, (k, v) => (k === 'canvas' || k === 'ctx') ? undefined : v)),
+                    dimensions: { ...appState.dimensions },
+                    activeLayerId: appState.activeLayerId,
+                    imageData: captureLayer ? captureLayer.ctx.getImageData(0, 0, captureLayer.canvas.width, captureLayer.canvas.height) : null,
+                    capturedLayerId: layerIdToCapture
+                };
+                appState.history.push({ action, state: stateSnapshot });
+                appState.historyIndex++;
+                if (appState.history.length > 100) { appState.history.shift(); appState.historyIndex--; }
+                appState.unsavedChanges = true;
+                updateUndoRedoButtons();
+                updateHistoryPanel();
+            }
+            function undo() { if (appState.historyIndex > 0) restoreStateFromHistory(appState.historyIndex - 1); }
+            function redo() { if (appState.historyIndex < appState.history.length - 1) restoreStateFromHistory(appState.historyIndex + 1); }
+            function restoreStateFromHistory(index) {
+                const historyEntry = appState.history[index];
+                if (!historyEntry) return;
+                
+                appState.dimensions = { ...historyEntry.state.dimensions };
+                canvasWrapper.style.width = `${appState.dimensions.width}px`;
+                canvasWrapper.style.height = `${appState.dimensions.height}px`;
+
+                historyEntry.state.layers.forEach(stateLayer => {
+                    let liveLayer = appState.layers.find(l => l.id === stateLayer.id);
+                    if (liveLayer) {
+                        Object.assign(liveLayer, stateLayer);
+                    }
+                });
+                
+                if (historyEntry.state.imageData && historyEntry.state.capturedLayerId) {
+                    const targetLayer = appState.layers.find(l => l.id === historyEntry.state.capturedLayerId);
+                    if (targetLayer) {
+                        targetLayer.canvas.width = historyEntry.state.imageData.width;
+                        targetLayer.canvas.height = historyEntry.state.imageData.height;
+                        targetLayer.ctx.putImageData(historyEntry.state.imageData, 0, 0);
+                    }
+                }
+                
+                appState.historyIndex = index;
+                appState.activeLayerId = historyEntry.state.activeLayerId;
+                updateUI();
+            }
+
+            // --- CANVAS TRANSFORMATION & INTERACTION ---
+            function updateCanvasTransform() {
+                canvasWrapper.style.transform = `scale(${appState.zoom}) translate(${appState.pan.x}px, ${appState.pan.y}px)`;
+                getEl('zoom-level').textContent = `${Math.round(appState.zoom * 100)}%`;
+            }
+            function zoom(factor) { appState.zoom = Math.max(0.1, Math.min(appState.zoom * factor, 16)); updateCanvasTransform(); }
+            function fitToScreen() {
+                if (appState.layers.length === 0) return;
+                const containerRect = canvasContainer.getBoundingClientRect();
+                const padding = 80;
+                const scaleX = (containerRect.width - padding) / appState.dimensions.width;
+                const scaleY = (containerRect.height - padding) / appState.dimensions.height;
+                appState.zoom = Math.min(scaleX, scaleY, 2);
+                appState.pan = { x: 0, y: 0 };
+                updateCanvasTransform();
+            }
+            function getCanvasCoordinates(e) {
+                const rect = canvasWrapper.getBoundingClientRect();
+                return {
+                    x: (e.clientX - rect.left) / appState.zoom,
+                    y: (e.clientY - rect.top) / appState.zoom,
+                };
+            }
+            function handleCanvasMouseDown(e) {
+                const coords = getCanvasCoordinates(e);
+                const activeLayer = getActiveLayer();
+                if (appState.activeTool === 'retouch' && e.altKey) {
+                    appState.cloneSource = {x: coords.x - activeLayer.x, y: coords.y - activeLayer.y};
+                    // Optional: add a visual indicator for the source point
+                    console.log('Clone source set:', appState.cloneSource);
+                    return;
+                }
+                if (appState.activeTool === 'draw' && activeLayer) { startDrawing(coords); }
+                else if (appState.activeTool === 'retouch' && activeLayer && appState.cloneSource) { startDrawing(coords); }
+                else if (appState.activeTool === 'move' && activeLayer) { startMovingLayer(coords); }
+                else if (e.button === 1 || appState.activeTool === 'pan') {
+                    appState.isPanning = true;
+                    appState.panStart = { x: e.clientX / appState.zoom - appState.pan.x, y: e.clientY / appState.zoom - appState.pan.y };
+                    canvasContainer.style.cursor = 'grabbing';
+                }
+            }
+            function handleWindowMouseMove(e) {
+                if (appState.isDrawing) { draw(getCanvasCoordinates(e)); }
+                else if (appState.isMovingLayer) { moveLayer(getCanvasCoordinates(e)); }
+                else if (appState.isCropping) { handleCropMove(e); }
+                else if (appState.isPanning) {
+                    appState.pan.x = e.clientX / appState.zoom - appState.panStart.x;
+                    appState.pan.y = e.clientY / appState.zoom - appState.panStart.y;
+                    updateCanvasTransform();
+                }
+            }
+            function handleWindowMouseUp(e) {
+                if (appState.isDrawing) stopDrawing();
+                if (appState.isMovingLayer) stopMovingLayer();
+                if (appState.isCropping) { appState.isCropping = false; appState.cropHandle = null; }
+                if (appState.isPanning) {
+                    appState.isPanning = false;
+                    canvasContainer.style.cursor = 'grab';
+                }
+            }
+            function handleCanvasWheel(e) { e.preventDefault(); zoom(1 - e.deltaY * 0.001); }
+
+            // --- TOOL LOGIC ---
+            function startDrawing(coords) { appState.isDrawing = true; appState.lastPoint = coords; }
+            function draw(coords) {
+                if (!appState.isDrawing) return;
+                if (appState.activeTool === 'draw') drawLine(coords);
+                else if (appState.activeTool === 'retouch') cloneStamp(coords);
+                appState.lastPoint = coords;
+            }
+            function stopDrawing() {
+                if (!appState.isDrawing) return;
+                appState.isDrawing = false;
+                const action = appState.activeTool === 'retouch' ? 'Clone Stamp' : 'Draw';
+                pushHistoryState(action, getActiveLayer()?.id);
+            }
+
+            function drawLine(coords) {
+                const layer = getActiveLayer(); if (!layer) return;
+                const ctx = layer.ctx;
+                ctx.beginPath();
+                ctx.moveTo(appState.lastPoint.x - layer.x, appState.lastPoint.y - layer.y);
+                ctx.lineTo(coords.x - layer.x, coords.y - layer.y);
+                ctx.strokeStyle = appState.brush.color;
+                ctx.lineWidth = appState.brush.size;
+                ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+                ctx.stroke();
+            }
+
+            function cloneStamp(coords) {
+                const layer = getActiveLayer(); if (!layer || !appState.cloneSource) return;
+                const ctx = layer.ctx;
+                const brushSize = appState.brush.size;
+                const destX = coords.x - layer.x;
+                const destY = coords.y - layer.y;
+                const sourceX = appState.cloneSource.x + (destX - (appState.lastPoint.x - layer.x));
+                const sourceY = appState.cloneSource.y + (destY - (appState.lastPoint.y - layer.y));
+
+                ctx.save();
+                ctx.beginPath();
+                ctx.arc(destX, destY, brushSize / 2, 0, Math.PI * 2);
+                ctx.clip();
+                ctx.drawImage(layer.canvas, sourceX - brushSize / 2, sourceY - brushSize / 2, brushSize, brushSize, destX - brushSize/2, destY - brushSize/2, brushSize, brushSize);
+                ctx.restore();
+                
+                appState.cloneSource.x = sourceX;
+                appState.cloneSource.y = sourceY;
+            }
+
+            function startMovingLayer(coords) {
+                appState.isMovingLayer = true;
+                const layer = getActiveLayer();
+                appState.moveStart = { x: coords.x - layer.x, y: coords.y - layer.y };
+            }
+            function moveLayer(coords) {
+                if (!appState.isMovingLayer) return;
+                const layer = getActiveLayer();
+                layer.x = coords.x - appState.moveStart.x;
+                layer.y = coords.y - appState.moveStart.y;
+                updateLayerStyles();
+            }
+            function stopMovingLayer() {
+                if (!appState.isMovingLayer) return;
+                appState.isMovingLayer = false;
+                pushHistoryState('Move Layer', getActiveLayer()?.id);
+            }
+            
+            function addTextToCanvas() {
+                const text = getEl('text-input').value;
+                if (!text.trim()) return;
+                
+                const newLayer = createLayer(`Text: ${text.substring(0, 15)}`);
+                const ctx = newLayer.ctx;
+                const fontSize = getEl('font-size-input').value;
+                const fontFamily = getEl('font-family-select').value;
+                ctx.font = `${fontSize}px ${fontFamily}`;
+                ctx.fillStyle = getEl('font-color-input').value;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(text, newLayer.canvas.width / 2, newLayer.canvas.height / 2);
+
+                addLayer(newLayer);
+                setActiveLayer(newLayer.id);
+                textModal.style.display = 'none';
+                getEl('text-input').value = '';
+                pushHistoryState('Add Text', newLayer.id);
+            }
+            
+            function startCrop() {
+                if(getEl('crop-overlay')) return;
+                const rect = { x: appState.dimensions.width * 0.1, y: appState.dimensions.height * 0.1, width: appState.dimensions.width * 0.8, height: appState.dimensions.height * 0.8 };
+                appState.cropRect = rect;
+                const overlay = document.createElement('div');
+                overlay.id = 'crop-overlay';
+                overlay.innerHTML = `<div class="crop-handle nw"></div><div class="crop-handle ne"></div><div class="crop-handle sw"></div><div class="crop-handle se"></div>`;
+                overlay.addEventListener('mousedown', (e) => {
+                    e.stopPropagation();
+                    appState.isCropping = true;
+                    appState.cropHandle = e.target.classList.contains('crop-handle') ? e.target.className.split(' ')[1] : 'move';
+                    appState.moveStart = getCanvasCoordinates(e);
+                });
+                canvasWrapper.appendChild(overlay);
+                updateCropOverlay();
+            }
+            function handleCropMove(e) {
+                if (!appState.isCropping || !appState.cropRect) return;
+                const coords = getCanvasCoordinates(e);
+                const dx = coords.x - appState.moveStart.x;
+                const dy = coords.y - appState.moveStart.y;
+                const { x, y, width, height } = appState.cropRect;
+
+                switch (appState.cropHandle) {
+                    case 'move': appState.cropRect.x += dx; appState.cropRect.y += dy; break;
+                    case 'nw': appState.cropRect.x += dx; appState.cropRect.y += dy; appState.cropRect.width -= dx; appState.cropRect.height -= dy; break;
+                    case 'ne': appState.cropRect.y += dy; appState.cropRect.width += dx; appState.cropRect.height -= dy; break;
+                    case 'sw': appState.cropRect.x += dx; appState.cropRect.width -= dx; appState.cropRect.height += dy; break;
+                    case 'se': appState.cropRect.width += dx; appState.cropRect.height += dy; break;
+                }
+                
+                appState.moveStart = coords;
+                updateCropOverlay();
+            }
+            function updateCropOverlay() {
+                const overlay = getEl('crop-overlay');
+                if (!overlay || !appState.cropRect) return;
+                overlay.style.left = `${appState.cropRect.x}px`;
+                overlay.style.top = `${appState.cropRect.y}px`;
+                overlay.style.width = `${appState.cropRect.width}px`;
+                overlay.style.height = `${appState.cropRect.height}px`;
+            }
+            function applyCrop() {
+                if (!appState.cropRect || appState.cropRect.width < 1 || appState.cropRect.height < 1) {
+                    console.error("Apply crop called with an invalid crop rectangle.");
+                    return cancelCrop();
+                }
+                const {x, y, width, height} = appState.cropRect;
+                appState.layers.forEach(layer => {
+                    const newCanvas = document.createElement('canvas');
+                    newCanvas.width = width; newCanvas.height = height;
+                    const newCtx = newCanvas.getContext('2d');
+                    newCtx.drawImage(layer.canvas, x - layer.x, y - layer.y, width, height, 0, 0, width, height);
+                    layer.canvas = newCanvas;
+                    layer.ctx = newCtx;
+                    layer.x = 0; layer.y = 0;
+                });
+                appState.dimensions = { width, height };
+                canvasWrapper.style.width = `${width}px`;
+                canvasWrapper.style.height = `${height}px`;
+                canvasWrapper.innerHTML = '';
+                appState.layers.forEach(l => canvasWrapper.appendChild(l.canvas));
+                pushHistoryState('Crop');
+                cancelCrop();
+                updateUI();
+                fitToScreen();
+            }
+            function cancelCrop() {
+                getEl('crop-overlay')?.remove();
+                appState.cropRect = null;
+                if(appState.activeTool === 'crop') appState.activeTool = 'move';
+                updateUI();
+            }
+            function rotateProject(degrees) {
+                const radians = degrees * Math.PI / 180;
+                const {width, height} = appState.dimensions;
+                const newWidth = Math.round(Math.abs(width * Math.cos(radians)) + Math.abs(height * Math.sin(radians)));
+                const newHeight = Math.round(Math.abs(width * Math.sin(radians)) + Math.abs(height * Math.cos(radians)));
+                
+                appState.layers.forEach(layer => {
+                    const newCanvas = document.createElement('canvas');
+                    newCanvas.width = newWidth; newCanvas.height = newHeight;
+                    const ctx = newCanvas.getContext('2d');
+                    ctx.translate(newWidth / 2, newHeight / 2);
+                    ctx.rotate(radians);
+                    ctx.drawImage(layer.canvas, -width / 2, -height / 2);
+                    layer.canvas = newCanvas;
+                    layer.ctx = ctx;
+                });
+
+                appState.dimensions = { width: newWidth, height: newHeight };
+                canvasWrapper.innerHTML = '';
+                appState.layers.forEach(l => canvasWrapper.appendChild(l.canvas));
+                pushHistoryState(`Rotate ${degrees}°`);
+                updateUI();
+                fitToScreen();
+            }
+
+            // --- EXPORT ---
+            function updateExportUI() {
+                const format = getEl('format-select').value;
+                getEl('quality-slider-container').style.display = format === 'png' ? 'none' : 'block';
+                getEl('transparent-bg-container').style.display = format === 'png' ? 'flex' : 'none';
+            }
+            function handleExport() {
+                const {width, height} = appState.dimensions;
+                const exportCanvas = document.createElement('canvas');
+                exportCanvas.width = width; exportCanvas.height = height;
+                const exportCtx = exportCanvas.getContext('2d');
+                const format = getEl('format-select').value;
+                const quality = getEl('quality-slider').value / 100;
+                if (format !== 'png' || !getEl('transparent-bg').checked) {
+                    exportCtx.fillStyle = '#FFFFFF'; exportCtx.fillRect(0, 0, width, height);
+                }
+                appState.layers.forEach(layer => {
+                    if (layer.visible) {
+                        exportCtx.save();
+                        exportCtx.globalAlpha = layer.opacity;
+                        exportCtx.globalCompositeOperation = layer.blendMode;
+                        exportCtx.filter = layer.canvas.style.filter;
+                        exportCtx.drawImage(layer.canvas, layer.x, layer.y);
+                        exportCtx.restore();
+                    }
+                });
+                exportCanvas.toBlob(blob => {
+                    const a = document.createElement('a');
+                    a.href = URL.createObjectURL(blob);
+                    a.download = `glint64-export.${format}`;
+                    a.click();
+                    URL.revokeObjectURL(a.href);
+                }, `image/${format}`, quality);
+                exportModal.style.display = 'none';
+                appState.unsavedChanges = false;
+            }
+
+            // --- RUN ---
+            init();
+        });
+    </script>
+
+</body>
+</html>
+
