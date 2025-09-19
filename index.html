@@ -57,7 +57,7 @@
             border-radius: 4px;
             font-size: 12px;
             white-space: nowrap;
-            z-index: 100;
+            z-index: 1000;
         }
         
         .active-tool, .tool-btn:hover { background: rgba(255, 255, 255, 0.1); color: white; }
@@ -81,15 +81,49 @@
             background-size: 20px 20px;
             background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
         }
+        
+        #canvas-wrapper {
+            outline: 1px solid rgba(150, 150, 150, 0.2);
+        }
+
+        #canvas-wrapper canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            pointer-events: none;
+        }
 
         /* Crop Overlay */
-        #crop-overlay { position: absolute; box-shadow: 0 0 0 9999px rgba(0,0,0,0.7); border: 1px dashed white; cursor: move; }
+        #crop-overlay { position: absolute; box-shadow: 0 0 0 9999px rgba(0,0,0,0.7); border: 1px dashed white; cursor: move; z-index: 900; }
         .crop-handle { position: absolute; width: 10px; height: 10px; background: white; border-radius: 50%; border: 1px solid black; }
         .crop-handle.nw { top: -5px; left: -5px; cursor: nwse-resize; }
         .crop-handle.ne { top: -5px; right: -5px; cursor: nesw-resize; }
         .crop-handle.sw { bottom: -5px; left: -5px; cursor: nesw-resize; }
         .crop-handle.se { bottom: -5px; right: -5px; cursor: nwse-resize; }
         
+        /* Selection Box */
+        #selection-box {
+            position: absolute;
+            pointer-events: none;
+            box-shadow: 0 0 0 2px rgba(191, 198, 204, 0.7), 0 0 10px 2px rgba(155, 160, 166, 0.5);
+            transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .resize-handle {
+            position: absolute;
+            width: 10px; height: 10px;
+            background: white; border: 1px solid black;
+            border-radius: 1px;
+            pointer-events: auto;
+        }
+        .resize-handle.nw { top: -5px; left: -5px; cursor: nwse-resize; }
+        .resize-handle.n { top: -5px; left: 50%; transform: translateX(-50%); cursor: ns-resize; }
+        .resize-handle.ne { top: -5px; right: -5px; cursor: nesw-resize; }
+        .resize-handle.w { top: 50%; left: -5px; transform: translateY(-50%); cursor: ew-resize; }
+        .resize-handle.e { top: 50%; right: -5px; transform: translateY(-50%); cursor: ew-resize; }
+        .resize-handle.sw { bottom: -5px; left: -5px; cursor: nesw-resize; }
+        .resize-handle.s { bottom: -5px; left: 50%; transform: translateX(-50%); cursor: ns-resize; }
+        .resize-handle.se { bottom: -5px; right: -5px; cursor: nwse-resize; }
+
         /* Tool Cursors */
         #brush-cursor {
             position: fixed;
@@ -110,10 +144,6 @@
             display: none;
             transform: translate(-6px, -6px) rotate(45deg);
         }
-        #filter-panel-content {
-            max-height: calc(100vh - 200px); /* Adjust as needed */
-            overflow-y: auto;
-        }
     </style>
 </head>
 <body class="overflow-hidden">
@@ -128,6 +158,7 @@
                 <h1 class="text-xl font-bold from-slate-300 to-slate-500 bg-gradient-to-b text-transparent bg-clip-text">Glint64</h1>
                 <div class="h-6 w-px bg-zinc-700"></div>
                 <button id="open-btn" class="flex items-center gap-2 px-3 py-1.5 rounded-md hover:bg-zinc-700 transition-colors text-sm">Open</button>
+                <button id="import-layer-btn" class="flex items-center gap-2 px-3 py-1.5 rounded-md hover:bg-zinc-700 transition-colors text-sm">Import Layer</button>
                 <button id="save-btn" class="flex items-center gap-2 px-3 py-1.5 rounded-md hover:bg-zinc-700 transition-colors text-sm">Export</button>
             </div>
             <div class="flex items-center gap-2">
@@ -150,7 +181,7 @@
         <!-- Left Sidebar: Tools -->
         <nav class="bg-zinc-900/80 border-r border-[var(--border-color)] p-2 flex flex-col items-center gap-2 z-20">
             <div class="flex flex-col gap-2" id="tools-container">
-                 <button class="tool-btn p-3 rounded-md relative active-tool" data-tool="move" data-tooltip="Move (V)"><i data-lucide="move" class="w-5 h-5 pointer-events-none"></i></button>
+                 <button class="tool-btn p-3 rounded-md relative active-tool" data-tool="move" data-tooltip="Move & Resize (V)"><i data-lucide="move" class="w-5 h-5 pointer-events-none"></i></button>
                 <button class="tool-btn p-3 rounded-md relative" data-tool="crop" data-tooltip="Crop (C)"><i data-lucide="crop" class="w-5 h-5 pointer-events-none"></i></button>
                 <button class="tool-btn p-3 rounded-md relative" data-tool="rotate" data-tooltip="Rotate (R)"><i data-lucide="rotate-cw" class="w-5 h-5 pointer-events-none"></i></button>
                 <div class="h-px w-full bg-zinc-700 my-2"></div>
@@ -167,6 +198,11 @@
         <main id="canvas-container" class="bg-grid flex items-center justify-center overflow-hidden relative select-none min-w-0">
             <div id="canvas-wrapper" class="relative shadow-2xl">
                  <!-- Layers will be appended here as canvas elements -->
+                 <div id="selection-box" class="hidden">
+                    <div class="resize-handle nw"></div><div class="resize-handle n"></div><div class="resize-handle ne"></div>
+                    <div class="resize-handle w"></div><div class="resize-handle e"></div>
+                    <div class="resize-handle sw"></div><div class="resize-handle s"></div><div class="resize-handle se"></div>
+                 </div>
             </div>
             <div id="welcome-message" class="text-center text-zinc-500 absolute">
                 <i data-lucide="image" class="w-16 h-16 mx-auto mb-4"></i>
@@ -183,7 +219,7 @@
                 <button data-panel="filter" class="panel-tab flex-1 p-3 text-sm font-medium border-b-2 border-transparent text-zinc-400 hover:text-white">Filters</button>
                 <button data-panel="history" class="panel-tab flex-1 p-3 text-sm font-medium border-b-2 border-transparent text-zinc-400 hover:text-white">History</button>
             </div>
-            <div class="flex-1 overflow-y-auto">
+            <div class="flex-1 overflow-y-auto min-h-0">
                 <div id="layers-panel-content" class="panel-content p-4 space-y-2">
                     <div class="flex justify-between items-center mb-2">
                         <span class="text-sm font-semibold">Layers</span>
@@ -274,21 +310,24 @@
             const appState = {
                 projectName: null, layers: [], activeLayerId: null, activeTool: 'move',
                 history: [], historyIndex: -1, zoom: 1, pan: { x: 0, y: 0 },
-                isPanning: false, isDrawing: false, isMovingLayer: false, isCropping: false,
+                isPanning: false, isDrawing: false, isMovingLayer: false, isCropping: false, isResizing: false,
                 panStart: { x: 0, y: 0 }, moveStart: { x: 0, y: 0 }, unsavedChanges: false,
                 dimensions: { width: 0, height: 0 }, brush: { size: 20, color: '#ffffff' },
-                cloneSource: null, cloneSourceCoords: {x: 0, y: 0}, cropRect: null, cropHandle: null, lastPoint: null,
+                cloneSource: null, cloneSourceCoords: {x: 0, y: 0}, cropRect: null, cropHandle: null, 
+                resizeHandle: null, lastPoint: null,
             };
 
             // --- DOM ELEMENTS ---
             const getEl = (id) => document.getElementById(id);
             const canvasContainer = getEl('canvas-container');
             const canvasWrapper = getEl('canvas-wrapper');
+            const selectionBox = getEl('selection-box');
             const welcomeMessage = getEl('welcome-message');
             const toolsContainer = getEl('tools-container');
             const rightPanel = getEl('right-panel');
             const layerList = getEl('layer-list');
             const openBtn = getEl('open-btn');
+            const importLayerBtn = getEl('import-layer-btn');
             const fileInput = getEl('file-input');
             const imageLayerInput = getEl('image-layer-input');
             const saveBtn = getEl('save-btn');
@@ -329,6 +368,10 @@
                 'Oceanic': 'saturate(1.2) contrast(1.1) hue-rotate(190deg) brightness(1.05)',
                 'Espresso': 'contrast(1.4) sepia(0.3) brightness(0.8) saturate(1.1)',
                 'Twilight': 'contrast(1.2) brightness(0.9) saturate(1.3) hue-rotate(330deg)',
+                'Golden': 'sepia(0.4) saturate(1.4) contrast(1.1) brightness(1.1)',
+                'Crimson': 'hue-rotate(-20deg) saturate(1.5) contrast(1.2) sepia(0.1)',
+                'Mint': 'hue-rotate(90deg) saturate(0.8) contrast(1.2) brightness(1.1)',
+                'Faded': 'contrast(0.8) saturate(0.8) brightness(1.1)',
             };
 
             // --- INITIALIZATION ---
@@ -343,6 +386,7 @@
             // --- EVENT LISTENERS ---
             function setupEventListeners() {
                 openBtn.addEventListener('click', () => fileInput.click());
+                importLayerBtn.addEventListener('click', () => imageLayerInput.click());
                 fileInput.addEventListener('change', handleFileSelect);
                 document.body.addEventListener('dragover', handleDragOver);
                 document.body.addEventListener('dragleave', handleDragLeave);
@@ -412,6 +456,8 @@
                 welcomeMessage.style.display = 'none';
                 appState.layers = [];
                 canvasWrapper.innerHTML = '';
+                // Re-add selection box after clearing
+                canvasWrapper.appendChild(selectionBox);
                 appState.history = [];
                 appState.historyIndex = -1;
                 appState.projectName = name;
@@ -449,7 +495,8 @@
             }
             function addLayer(layer, recordHistory = true) {
                 appState.layers.push(layer);
-                canvasWrapper.appendChild(layer.canvas);
+                // Insert before the selection box
+                canvasWrapper.insertBefore(layer.canvas, selectionBox);
                 if (recordHistory) pushHistoryState(`Add Layer: ${layer.name}`);
                 updateUI();
             }
@@ -598,6 +645,7 @@
                 updateCanvasTransform();
                 updateLayerStyles();
                 updateToolOptionsBar();
+                updateSelectionBox();
                 updateCursor();
             }
             function updateToolUI() {
@@ -650,11 +698,13 @@
             }
             function updateLayerStyles() {
                 appState.layers.forEach((layer, index) => {
-                    layer.canvas.style.zIndex = index;
+                    layer.canvas.style.zIndex = index + 1; // Keep layers above the base wrapper
                     layer.canvas.style.opacity = layer.opacity;
                     layer.canvas.style.mixBlendMode = layer.blendMode;
                     layer.canvas.style.display = layer.visible ? 'block' : 'none';
                     layer.canvas.style.transform = `translate(${layer.x}px, ${layer.y}px)`;
+                    layer.canvas.style.width = `${layer.canvas.width}px`;
+                    layer.canvas.style.height = `${layer.canvas.height}px`;
                     
                     const adjustmentString = Object.entries(layer.adjustments)
                         .map(([key, value]) => {
@@ -667,6 +717,19 @@
                     const presetFilterString = filters[layer.presetFilter] || '';
                     layer.canvas.style.filter = `${presetFilterString} ${adjustmentString}`.trim();
                 });
+            }
+            function updateSelectionBox() {
+                const layer = getActiveLayer();
+                if (layer && appState.activeTool === 'move') {
+                    selectionBox.style.display = 'block';
+                    selectionBox.style.left = `${layer.x}px`;
+                    selectionBox.style.top = `${layer.y}px`;
+                    selectionBox.style.width = `${layer.canvas.width}px`;
+                    selectionBox.style.height = `${layer.canvas.height}px`;
+                    selectionBox.style.zIndex = appState.layers.length + 2;
+                } else {
+                    selectionBox.style.display = 'none';
+                }
             }
             function updateUndoRedoButtons() {
                 undoBtn.disabled = appState.historyIndex < 1;
@@ -760,6 +823,13 @@
             }
             function handleCanvasMouseDown(e) {
                 e.stopPropagation();
+
+                // Check if a resize handle was clicked first
+                if (e.target.classList.contains('resize-handle')) {
+                    startResizing(e);
+                    return;
+                }
+
                 const coords = getCanvasCoordinates(e);
                 const activeLayer = getActiveLayer();
 
@@ -805,6 +875,7 @@
             function handleWindowMouseMove(e) {
                 updateBrushCursor(e);
                 if (appState.isDrawing) { draw(getCanvasCoordinates(e)); }
+                else if (appState.isResizing) { resizeLayer(e); }
                 else if (appState.isMovingLayer) { moveLayer(getCanvasCoordinates(e)); }
                 else if (appState.isCropping) { handleCropMove(e); }
                 else if (appState.isPanning) {
@@ -815,6 +886,7 @@
             }
             function handleWindowMouseUp(e) {
                 if (appState.isDrawing) stopDrawing();
+                if (appState.isResizing) stopResizing();
                 if (appState.isMovingLayer) stopMovingLayer();
                 if (appState.isCropping) { appState.isCropping = false; appState.cropHandle = null; }
                 appState.isPanning = false;
@@ -903,6 +975,7 @@
                 layer.x = coords.x - appState.moveStart.x;
                 layer.y = coords.y - appState.moveStart.y;
                 updateLayerStyles();
+                updateSelectionBox();
             }
             function stopMovingLayer() {
                 if (!appState.isMovingLayer) return;
@@ -910,6 +983,63 @@
                 pushHistoryState('Move Layer');
             }
             
+            function startResizing(e) {
+                e.stopPropagation();
+                appState.isResizing = true;
+                appState.resizeHandle = e.target.className.split(' ')[1];
+                const layer = getActiveLayer();
+                appState.moveStart = { 
+                    x: e.clientX, y: e.clientY,
+                    layerX: layer.x, layerY: layer.y,
+                    layerWidth: layer.canvas.width, layerHeight: layer.canvas.height
+                };
+            }
+            function resizeLayer(e) {
+                if (!appState.isResizing) return;
+                const layer = getActiveLayer();
+                const dx = (e.clientX - appState.moveStart.x) / appState.zoom;
+                const dy = (e.clientY - appState.moveStart.y) / appState.zoom;
+
+                let newX = appState.moveStart.layerX;
+                let newY = appState.moveStart.layerY;
+                let newWidth = appState.moveStart.layerWidth;
+                let newHeight = appState.moveStart.layerHeight;
+                
+                if (appState.resizeHandle.includes('e')) newWidth += dx;
+                if (appState.resizeHandle.includes('w')) { newWidth -= dx; newX += dx; }
+                if (appState.resizeHandle.includes('s')) newHeight += dy;
+                if (appState.resizeHandle.includes('n')) { newHeight -= dy; newY += dy; }
+
+                layer.x = newX; layer.y = newY;
+                // Update canvas style for preview, but don't change canvas data yet
+                layer.canvas.style.width = `${Math.max(1, newWidth)}px`;
+                layer.canvas.style.height = `${Math.max(1, newHeight)}px`;
+                
+                updateLayerStyles();
+                updateSelectionBox();
+            }
+            function stopResizing() {
+                if (!appState.isResizing) return;
+                const layer = getActiveLayer();
+                const newWidth = Math.max(1, parseFloat(layer.canvas.style.width));
+                const newHeight = Math.max(1, parseFloat(layer.canvas.style.height));
+
+                const tempCanvas = document.createElement('canvas');
+                tempCanvas.width = newWidth;
+                tempCanvas.height = newHeight;
+                tempCanvas.getContext('2d').drawImage(layer.canvas, 0, 0, newWidth, newHeight);
+
+                layer.canvas.width = newWidth;
+                layer.canvas.height = newHeight;
+                layer.ctx.clearRect(0, 0, newWidth, newHeight);
+                layer.ctx.drawImage(tempCanvas, 0, 0);
+
+                layer.imageDataCache = null; // Invalidate cache after resize
+                appState.isResizing = false;
+                pushHistoryState('Resize Layer', layer.id);
+                updateUI();
+            }
+
             async function addTextToCanvas() {
                 const text = getEl('text-input').value;
                 if (!text.trim() || !appState.projectName) return;
@@ -918,7 +1048,6 @@
                 const fontFamily = getEl('font-family-select').value;
                 const color = getEl('font-color-input').value;
 
-                // Load font before measuring
                 await document.fonts.load(`${fontSize}px ${fontFamily}`);
                 
                 const tempCtx = document.createElement('canvas').getContext('2d');
@@ -1000,13 +1129,16 @@
                     layer.canvas = newCanvas;
                     layer.ctx = newCtx;
                     layer.x = 0; layer.y = 0;
-                    layer.imageDataCache = null; // Invalidate cache after crop
+                    layer.imageDataCache = null; 
                 });
                 appState.dimensions = { width: newWidth, height: newHeight };
                 canvasWrapper.style.width = `${newWidth}px`;
                 canvasWrapper.style.height = `${newHeight}px`;
+                // Clear and re-add layers and selection box
                 canvasWrapper.innerHTML = '';
                 appState.layers.forEach(l => canvasWrapper.appendChild(l.canvas));
+                canvasWrapper.appendChild(selectionBox);
+
                 pushHistoryState('Crop');
                 cancelCrop();
                 updateUI();
@@ -1036,8 +1168,9 @@
                     layer.canvas.height = newHeight;
                     layer.ctx.clearRect(0, 0, newWidth, newHeight);
                     layer.ctx.drawImage(tempCanvas, 0, 0);
-                    layer.x = 0; layer.y = 0;
-                    layer.imageDataCache = null; // Invalidate cache after rotate
+                    layer.x = (newWidth - layer.canvas.width) / 2;
+                    layer.y = (newHeight - layer.canvas.height) / 2;
+                    layer.imageDataCache = null;
                 });
 
                 appState.dimensions = { width: newWidth, height: newHeight };
@@ -1070,14 +1203,14 @@
                         exportCtx.globalAlpha = layer.opacity;
                         exportCtx.globalCompositeOperation = layer.blendMode;
                         exportCtx.filter = layer.canvas.style.filter;
-                        exportCtx.drawImage(layer.canvas, layer.x, layer.y);
+                        exportCtx.drawImage(layer.canvas, layer.x, layer.y, layer.canvas.width, layer.canvas.height);
                         exportCtx.restore();
                     }
                 });
                 exportCanvas.toBlob(blob => {
                     const a = document.createElement('a');
                     a.href = URL.createObjectURL(blob);
-a.download = `glint64-export.${format === 'jpeg' ? 'jpg' : format}`;
+                    a.download = `glint64-export.${format === 'jpeg' ? 'jpg' : format}`;
                     a.click();
                     URL.revokeObjectURL(a.href);
                 }, `image/${format}`, quality);
